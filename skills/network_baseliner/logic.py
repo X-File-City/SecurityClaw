@@ -67,11 +67,37 @@ def run(context: dict) -> dict:
         len(grouped_logs),
     )
 
-    # ── 3. Generate baselines for each network/sensor ────────────────────────
+    # ── 3. Check embedding dimension vs existing index dimension ─────────────
+    current_embed_dim = _detect_embed_dim(llm)
+    index_dim = _get_index_dim(db, vector_index)
+    fresh_start = False
+
+    if current_embed_dim and index_dim and current_embed_dim != index_dim:
+        logger.warning(
+            "[%s] Embedding dimension mismatch: index has %d dims, embed model produces %d dims. "
+            "The vector index will be wiped — all baselines will be re-generated from scratch.",
+            SKILL_NAME, index_dim, current_embed_dim,
+        )
+        fresh_start = True
+    elif index_dim is None:
+        fresh_start = True  # No existing index — starting fresh
+
+    # ── 4. Read existing baselines before RAGEngine init (which may wipe index) ─
+    existing_baselines_by_id: dict[str, dict[str, str]] = {}
+    if not fresh_start:
+        for ident in grouped_logs:
+            prior = _fetch_existing_baselines(db, vector_index, ident)
+            if prior:
+                existing_baselines_by_id[ident] = prior
+                logger.info(
+                    "[%s] Loaded %d existing baseline docs for '%s' — will update them.",
+                    SKILL_NAME, len(prior), ident,
+                )
+
+    # ── 5. Init RAGEngine (handles dim-mismatch wipe + index creation) ────────
     from core.rag_engine import RAGEngine
 
     rag = RAGEngine(db=db, llm=llm)
-    rag.db.ensure_vector_index(vector_index)
 
     all_stored_docs = []
     for identifier, logs_group in grouped_logs.items():
@@ -89,12 +115,16 @@ def run(context: dict) -> dict:
         analytics = _analyze_network_logs(logs_group)
         analytics_text = _format_analytics(analytics)
 
+        # Include any existing baselines for this identifier as prior context
+        prior_baselines = existing_baselines_by_id.get(identifier, {})
+
         # Generate baselines specific to this network/sensor
         baselines = _generate_baseline_documents(
             analytics,
             analytics_text,
             llm,
             instruction,
+            existing_baselines=prior_baselines,
         )
 
         if not baselines:
@@ -245,19 +275,101 @@ def _group_logs_by_identifier(logs: list[dict], identifier_field: str) -> dict[s
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Embedding dimension helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _detect_embed_dim(llm) -> int | None:
+    """Return the current embedding dimension produced by the LLM provider, or None."""
+    try:
+        return len(llm.embed("test"))
+    except Exception as exc:
+        logger.warning("[%s] Could not detect embedding dimension: %s", SKILL_NAME, exc)
+        return None
+
+
+def _get_index_dim(db, vector_index: str) -> int | None:
+    """Return the embedding dimension stored in the index mapping, or None if unavailable."""
+    try:
+        if not hasattr(db, "_client"):
+            return None
+        client = db._client
+        if not client.indices.exists(index=vector_index):
+            return None
+        mapping = client.indices.get_mapping(index=vector_index)
+        return (
+            mapping.get(vector_index, {})
+            .get("mappings", {})
+            .get("properties", {})
+            .get("embedding", {})
+            .get("dimension")
+        )
+    except Exception as exc:
+        logger.warning("[%s] Could not read index dimension: %s", SKILL_NAME, exc)
+        return None
+
+
+def _fetch_existing_baselines(db, vector_index: str, identifier_value: str) -> dict[str, str]:
+    """Return existing baseline docs for this network/sensor as {category: text}."""
+    try:
+        query = {
+            "query": {
+                "bool": {
+                    "filter": [
+                        {"term": {"source": SKILL_NAME}},
+                        {"term": {"identifier_value": identifier_value}},
+                    ]
+                }
+            },
+            "_source": ["text", "category"],
+        }
+        docs = db.search(vector_index, query, size=50)
+        result: dict[str, str] = {}
+        for doc in docs:
+            cat = doc.get("category", "")
+            text = doc.get("text", "")
+            if cat and text:
+                result[cat] = text
+        return result
+    except Exception as exc:
+        logger.warning(
+            "[%s] Could not fetch existing baselines for '%s': %s",
+            SKILL_NAME, identifier_value, exc,
+        )
+        return {}
+
+
+def _with_prior(prompt: str, existing_baselines: dict, category: str) -> str:
+    """Append existing baseline text to the prompt so the LLM can update it."""
+    prior = existing_baselines.get(category, "")
+    if not prior:
+        return prompt
+    return (
+        prompt
+        + "\n\nPRIOR BASELINE (incorporate into your updated summary;"
+        " note any changes if network behaviour has evolved):\n"
+        + prior
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 def _generate_baseline_documents(
     analytics: dict,
     analytics_text: str,
     llm,
     instruction: str,
+    existing_baselines: dict | None = None,
 ) -> list[dict]:
     """
     Generate multiple baseline documents covering different network dimensions.
     Each document is a focused analysis of a specific aspect, enabling better RAG retrieval.
     
+    If existing_baselines ({category: prior_text}) is supplied, each LLM prompt
+    will include the prior summary so the model can update rather than replace it.
+
     Returns list of dicts with "summary" and "category" for each baseline.
     """
+    existing_baselines = existing_baselines or {}
     baselines = []
     
     # ── Baseline 1: Protocol & Service Baseline ────────────────────────────────
@@ -286,7 +398,7 @@ Produce a single-sentence summary of the typical protocols and services in use."
         
         response = llm.chat([
             {"role": "system", "content": "You are a network analyst. Produce concise, factual summaries."},
-            {"role": "user", "content": proto_prompt},
+            {"role": "user", "content": _with_prior(proto_prompt, existing_baselines, "network_baseline_protocols_services")},
         ])
         baselines.append({
             "summary": response,
@@ -308,7 +420,7 @@ Produce a clear summary of the port distribution and which services are most act
         
         response = llm.chat([
             {"role": "system", "content": "You are a network analyst. Be specific and factual."},
-            {"role": "user", "content": port_prompt},
+            {"role": "user", "content": _with_prior(port_prompt, existing_baselines, "network_baseline_port_landscape")},
         ])
         baselines.append({
             "summary": response,
@@ -342,7 +454,7 @@ Summarize the typical source IPs, destination IPs, and common communication path
         
         response = llm.chat([
             {"role": "system", "content": "You are a network analyst. Focus on communication patterns."},
-            {"role": "user", "content": ip_prompt},
+            {"role": "user", "content": _with_prior(ip_prompt, existing_baselines, "network_baseline_ip_communication")},
         ])
         baselines.append({
             "summary": response,
@@ -368,7 +480,7 @@ Summarize the typical traffic direction mix (inbound/outbound/internal percentag
         
         response = llm.chat([
             {"role": "system", "content": "You are a network analyst."},
-            {"role": "user", "content": direction_prompt},
+            {"role": "user", "content": _with_prior(direction_prompt, existing_baselines, "network_baseline_traffic_direction")},
         ])
         baselines.append({
             "summary": response,
@@ -399,7 +511,7 @@ Summarize which external systems/regions are contacted and their frequency."""
         
         response = llm.chat([
             {"role": "system", "content": "You are a network analyst."},
-            {"role": "user", "content": external_prompt},
+            {"role": "user", "content": _with_prior(external_prompt, existing_baselines, "network_baseline_external_contacts")},
         ])
         baselines.append({
             "summary": response,
@@ -422,7 +534,7 @@ Summarize the typical DNS queries and domains being resolved."""
         
         response = llm.chat([
             {"role": "system", "content": "You are a network analyst."},
-            {"role": "user", "content": dns_prompt},
+            {"role": "user", "content": _with_prior(dns_prompt, existing_baselines, "network_baseline_dns_activity")},
         ])
         baselines.append({
             "summary": response,

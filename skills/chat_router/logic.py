@@ -72,6 +72,12 @@ Always include the user question in parameters."""
             result["parameters"] = {}
         if "question" not in result["parameters"]:
             result["parameters"]["question"] = user_question
+        
+        # Filter out network_baseliner if not explicitly requested
+        result["skills"] = _filter_explicit_only_skills(
+            result.get("skills", []),
+            user_question,
+        )
         return result
     except json.JSONDecodeError:
         logger.warning("[%s] Failed to parse LLM routing response: %s", SKILL_NAME, response)
@@ -95,6 +101,53 @@ Always include the user question in parameters."""
             "skills": [],
             "parameters": {"question": user_question},
         }
+
+
+def _filter_explicit_only_skills(skills: list[str], user_question: str) -> list[str]:
+    """
+    Filter out skills that are explicit-only (like network_baseliner)
+    unless the user explicitly mentions them by name or a variant.
+    
+    network_baseliner is explicit-only: user must say:
+      - "network_baseliner"
+      - "baseliner"
+      - "create baseline"
+      - "generate baseline"
+      - "build baseline"
+    
+    Otherwise, replace with rag_querier to search existing baselines.
+    """
+    filtered = []
+    question_lower = user_question.lower()
+    
+    # Keywords that explicitly invoke network_baseliner
+    explicit_keywords = [
+        "network_baseliner",
+        "baseliner",
+        "create baseline",
+        "generate baseline",
+        "build baseline",
+        "create a baseline",
+        "generate a baseline",
+        "build a baseline",
+        "create new baseline",
+        "generate new baseline",
+    ]
+    explicit_requested = any(kw in question_lower for kw in explicit_keywords)
+    
+    for skill in skills:
+        if skill == "network_baseliner" and not explicit_requested:
+            logger.info(
+                "[%s] Blocked auto-routing to network_baseliner; user must explicitly request it.",
+                SKILL_NAME,
+            )
+            # Replace with rag_querier for baseline queries
+            if "rag_querier" not in filtered:
+                filtered.append("rag_querier")
+        else:
+            filtered.append(skill)
+    
+    return filtered
 
 
 def execute_skill_workflow(

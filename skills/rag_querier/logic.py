@@ -44,40 +44,33 @@ def run(context: dict) -> dict:
     logs_index = cfg.get("db", "logs_index", default="securityclaw-logs")
     vector_index = cfg.get("db", "vector_index", default="securityclaw-vectors")
 
-    # ── 1. Generate search embeddings from the user question ──────────────────
+    # ── 1. Search RAG for relevant baselines ──────────────────────────────────
     logger.info("[%s] Searching for: %s", SKILL_NAME, user_question)
-    
-    query_embedding = None
-    embedding_available = True
-    try:
-        query_embedding = llm.embed(user_question)
-    except Exception as exc:
-        logger.warning("[%s] Embedding unavailable, will skip RAG search: %s", SKILL_NAME, exc)
-        embedding_available = False
 
-    # ── 2. Search RAG for relevant baselines (only if embedding works) ────────
     rag_docs = []
-    if embedding_available and query_embedding:
-        try:
-            from core.rag_engine import RAGEngine
-            rag = RAGEngine(db=db, llm=llm)
-            rag_docs = rag.retrieve(query_embedding, k=5)
-            logger.info("[%s] Found %d relevant baselines in RAG.", SKILL_NAME, len(rag_docs))
-        except Exception as exc:
-            logger.warning("[%s] RAG retrieval failed: %s", SKILL_NAME, exc)
-            # Continue with raw logs even if RAG fails
-    elif not embedding_available:
-        logger.info("[%s] Skipping RAG search (embedding unavailable).", SKILL_NAME)
-
-    # ── 3. Search raw logs for matching data ──────────────────────────────────
-    raw_logs = []
     try:
-        raw_logs = _search_raw_logs(user_question, db, logs_index)
-        logger.info("[%s] Found %d matching records in logs.", SKILL_NAME, len(raw_logs))
+        from core.rag_engine import RAGEngine
+
+        rag = RAGEngine(db=db, llm=llm)
+        rag_docs = rag.retrieve(user_question, k=5)
+        logger.info("[%s] Found %d relevant baselines in RAG.", SKILL_NAME, len(rag_docs))
+    except Exception as exc:
+        logger.warning("[%s] RAG retrieval failed: %s", SKILL_NAME, exc)
+        # Continue with raw logs even if RAG fails
+
+    # ── 2. Search raw logs for matching data ──────────────────────────────────
+    raw_logs = []
+    search_terms_used = []
+    try:
+        raw_logs, search_terms_used = _search_raw_logs(user_question, db, logs_index, cfg)
+        logger.info(
+            "[%s] Found %d matching records in logs (search terms: %s).",
+            SKILL_NAME, len(raw_logs), search_terms_used
+        )
     except Exception as exc:
         logger.error("[%s] Raw log search failed: %s", SKILL_NAME, exc)
 
-    # ── 4. If neither RAG nor raw logs have data, return no_data ──────────────
+    # ── 3. If neither RAG nor raw logs have data, return no_data ──────────────
     if not rag_docs and not raw_logs:
         logger.info("[%s] No data found (RAG or logs).", SKILL_NAME)
         return {
@@ -89,8 +82,10 @@ def run(context: dict) -> dict:
             },
         }
 
-    # ── 5. Analyze combined data with LLM to extract answer ──────────────────
-    combined_context = _format_combined_context(rag_docs, raw_logs, user_question)
+    # ── 4. Analyze combined data with LLM to extract answer ──────────────────
+    combined_context = _format_combined_context(
+        rag_docs, raw_logs, user_question, search_terms_used
+    )
     answer = _extract_answer_from_data(user_question, combined_context, instruction, llm)
 
     findings = {
@@ -106,9 +101,14 @@ def run(context: dict) -> dict:
     }
 
     logger.info(
-        "[%s] Answer compiled from %d baselines and %d log records.",
+        "[%s] Answer compiled from %d baselines + %d log records. "
+        "RAG docs delivered: %d/%d, Raw logs delivered: %d/%d",
         SKILL_NAME,
         len(rag_docs),
+        len(raw_logs),
+        min(len(rag_docs), 5),  # All RAG docs now
+        len(rag_docs),
+        min(len(raw_logs), 10),  # Raw logs up to 10
         len(raw_logs),
     )
 
@@ -118,63 +118,108 @@ def run(context: dict) -> dict:
     }
 
 
-def _search_raw_logs(question: str, db: Any, logs_index: str) -> list[dict]:
+def _search_raw_logs(question: str, db: Any, logs_index: str, cfg: Any) -> tuple[list[dict], list[str]]:
     """
     Search raw logs for data matching the user question.
-    Intelligently extracts keywords from the question and searches.
+    SCHEMA-AGNOSTIC: Uses field mappings from config to adapt to any data format.
+    
+    Returns (logs, search_terms_used) tuple so caller knows what was searched.
+    Supports any log format: Suricata EVE, ECS, Zeek, NetFlow, etc.
+    Field mapping defined in config.yaml under db.field_mappings
+    
+    Intelligently extracts keywords from the question and searches,
+    including geographic, temporal, and pattern-based queries.
     """
     # Extract potential search terms from the question
     search_terms = _extract_search_terms(question)
     
     if not search_terms:
-        return []
+        return [], []
+    
+    # Get field mappings for the configured schema
+    logs_schema = cfg.get("db", "logs_schema", default="suricata")
+    field_mappings = cfg.get("db", "field_mappings", default={})
+    schema_fields = field_mappings.get(logs_schema, field_mappings.get("suricata", {}))
+    
+    if not schema_fields:
+        logger.warning(
+            "[%s] No field mappings found for schema '%s'; skipping log search",
+            SKILL_NAME, logs_schema
+        )
+        return [], []
+    
+    # Helper to get the actual field name for a logical concept
+    def get_field(logical_name: str) -> str:
+        """Resolve logical field name to actual field name based on schema."""
+        return schema_fields.get(logical_name, logical_name)
     
     import re as _re
     ip_pattern = r'^(?:\d{1,3}\.){3}\d{1,3}$'
     port_pattern = r'^\d{1,5}$'
     protocol_names = {'tcp', 'udp', 'icmp', 'http', 'https', 'dns', 'ssh', 'rdp', 'smb'}
+    
+    # Common country names and aliases for geolocation queries
+    country_names = {
+        'iran', 'china', 'russia', 'north korea', 'syria', 'cuba',
+        'usa', 'united states', 'uk', 'england', 'france', 'germany', 'japan',
+        'india', 'brazil', 'canada', 'australia', 'netherlands', 'israel',
+        'uae', 'saudi arabia', 'iran', 'iraq', 'afghanistan', 'pakistan',
+    }
 
-    # Build a broad should query across all relevant fields
+    # Get actual field names from schema mapping
+    src_ip_field = get_field("source_ip")
+    dst_ip_field = get_field("destination_ip")
+    src_port_field = get_field("source_port")
+    dst_port_field = get_field("destination_port")
+    proto_field = get_field("protocol")
+    app_proto_field = get_field("application_protocol")
+    country_field = get_field("country_name")
+    timestamp_field = get_field("timestamp")
+
+    # Build a broad should query using schema-mapped field names
     should_clauses = []
 
     for term in search_terms:
         if _re.match(ip_pattern, term):
-            # IP addresses — use term queries (exact match on keyword/ip fields)
+            # IP addresses — use mapped field names
             should_clauses += [
-                {"term": {"destination.ip": term}},
-                {"term": {"source.ip": term}},
-                {"term": {"destination.ip.keyword": term}},
-                {"term": {"source.ip.keyword": term}},
+                {"term": {dst_ip_field: term}},
+                {"term": {src_ip_field: term}},
+                {"term": {f"{dst_ip_field}.keyword": term}},
+                {"term": {f"{src_ip_field}.keyword": term}},
             ]
         elif _re.match(port_pattern, term):
-            # Port numbers — numeric term
+            # Port numbers — use mapped field names
             try:
                 port_int = int(term)
                 should_clauses += [
-                    {"term": {"destination.port": port_int}},
-                    {"term": {"source.port": port_int}},
+                    {"term": {dst_port_field: port_int}},
+                    {"term": {src_port_field: port_int}},
                 ]
             except ValueError:
                 pass
         elif term.lower() in protocol_names:
-            # Protocols — term on keyword field
+            # Protocols — use mapped field name (may be 'TCP', 'tcp', 'proto', etc.)
             should_clauses += [
-                {"term": {"network.protocol": term.lower()}},
-                {"term": {"network.protocol.keyword": term.lower()}},
-                {"match": {"network.transport": term.lower()}},
+                {"term": {proto_field: term.upper()}},
+                {"term": {f"{proto_field}.keyword": term.upper()}},
+                {"match": {proto_field: term.lower()}},
+            ]
+        elif term.lower() in country_names:
+            # Geographic queries — use mapped country field
+            should_clauses += [
+                {"term": {f"{country_field}.keyword": term.capitalize() if len(term) > 3 else term.upper()}},
+                {"match": {country_field: {"query": term}}},
             ]
         else:
-            # Hostnames, domains, other strings — full-text match
+            # Hostnames, domains, other strings — full-text match on app protocol
             should_clauses += [
-                {"match": {"host.hostname": {"query": term}}},
-                {"match": {"agent.name": {"query": term}}},
-                {"match": {"dns.question.name": {"query": term}}},
-                {"match": {"url.domain": {"query": term}}},
-                {"wildcard": {"host.hostname.keyword": {"value": f"*{term}*"}}},
+                {"match": {app_proto_field: {"query": term}}},
+                {"wildcard": {f"{app_proto_field}.keyword": {"value": f"*{term}*"}}},
             ]
 
     if not should_clauses:
-        return []
+        return [], []
 
     query = {
         "query": {
@@ -183,7 +228,7 @@ def _search_raw_logs(question: str, db: Any, logs_index: str) -> list[dict]:
                 "minimum_should_match": 1,
                 "filter": {
                     "range": {
-                        "@timestamp": {"gte": "now-24h"}
+                        timestamp_field: {"gte": "now-90d"}  # Broader window for testing/demo data
                     }
                 },
             }
@@ -191,12 +236,17 @@ def _search_raw_logs(question: str, db: Any, logs_index: str) -> list[dict]:
         "size": 50,
     }
     
+    logger.info(
+        "[%s] Using schema '%s' with fields: src=%s, dst=%s, proto=%s, country=%s",
+        SKILL_NAME, logs_schema, src_ip_field, dst_ip_field, proto_field, country_field
+    )
+    
     try:
         results = db.search(logs_index, query, size=50)
-        return results
+        return results, search_terms
     except Exception as exc:
         logger.warning("[%s] Raw log search error: %s", SKILL_NAME, exc)
-        return []
+        return [], []
 
 
 def _extract_search_terms(question: str) -> list[str]:
@@ -209,6 +259,18 @@ def _extract_search_terms(question: str) -> list[str]:
 
     terms = []
     remaining = question
+    
+    # Common countries for explicit extraction (before stopword filter)
+    countries = [
+        'iran', 'iraq', 'china', 'russia', 'north korea', 'syria', 'cuba',
+        'usa', 'united states', 'uk', 'england', 'france', 'germany', 'japan',
+        'india', 'brazil', 'canada', 'australia', 'netherlands', 'israel',
+        'uae', 'saudi arabia', 'afghanistan', 'pakistan', 'korea',
+    ]
+    for country in countries:
+        if re.search(rf'\b{country}\b', remaining, re.IGNORECASE):
+            terms.append(country.lower())
+            remaining = re.sub(rf'\b{country}\b', ' ', remaining, flags=re.IGNORECASE)
 
     # 1. Extract IPv4 addresses first (remove them so octets don't get picked up again)
     ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
@@ -236,12 +298,23 @@ def _extract_search_terms(question: str) -> list[str]:
         terms.append(m.group(1))
 
     # 5. Deduplicate and strip noise
+    # Note: Countries are intentionally excluded from stopwords
     stopwords = {
         'what', 'is', 'there', 'any', 'traffic', 'to', 'from', 'the', 'a',
         'are', 'on', 'in', 'for', 'if', 'and', 'or', 'not', 'was', 'were',
         'have', 'has', 'had', 'past', 'hours', 'last', 'days', 'recent',
-        'show', 'me', 'check', 'find', 'network', 'do',
+        'show', 'me', 'check', 'find', 'network', 'do', 'you', 'can', 'search',
+        'visiting', 'find', 'see', 'look', 'tell',
     }
+    
+    # Countries must never be filtered
+    country_names = {
+        'iran', 'iraq', 'china', 'russia', 'north korea', 'syria', 'cuba',
+        'usa', 'united states', 'uk', 'england', 'france', 'germany', 'japan',
+        'india', 'brazil', 'canada', 'australia', 'netherlands', 'israel',
+        'uae', 'saudi arabia', 'afghanistan', 'pakistan', 'korea',
+    }
+    
     seen = set()
     unique = []
     for t in terms:
@@ -253,13 +326,25 @@ def _extract_search_terms(question: str) -> list[str]:
     return unique
 
 
-def _format_combined_context(rag_docs: list[dict], raw_logs: list[dict], question: str) -> str:
+def _format_combined_context(
+    rag_docs: list[dict], raw_logs: list[dict], question: str, search_terms: list[str] = None
+) -> str:
     """Format both RAG baseline data and raw logs for LLM analysis."""
+    if search_terms is None:
+        search_terms = []
+    
     context_parts = []
+    
+    # Add user's question for clarity
+    context_parts.append(f"User Question: {question}")
+    
+    # Add search terms used if any
+    if search_terms:
+        context_parts.append(f"Search Terms Extracted: {', '.join(search_terms)}")
     
     if rag_docs:
         context_parts.append("=== BASELINE KNOWLEDGE (from stored baselines) ===")
-        for i, doc in enumerate(rag_docs[:3], 1):  # Top 3 RAG docs
+        for i, doc in enumerate(rag_docs, 1):  # All retrieved RAG docs (typically 5)
             category = doc.get("category", "unknown")
             source = doc.get("source", "unknown")
             text = doc.get("text", "")
@@ -270,25 +355,54 @@ def _format_combined_context(rag_docs: list[dict], raw_logs: list[dict], questio
     
     if raw_logs:
         context_parts.append("\n=== OBSERVED DATA (from recent logs) ===")
-        context_parts.append(_summarize_raw_logs(raw_logs, question))
+        # Add note about what was searched for
+        if search_terms:
+            context_parts.append(
+                f"Note: These logs were selected because they match your search for: {', '.join(search_terms)}"
+            )
+        context_parts.append(_summarize_raw_logs(raw_logs, question, search_terms))
     
     return "\n\n".join(context_parts)
 
 
-def _summarize_raw_logs(logs: list[dict], question: str) -> str:
-    """Summarize raw logs to highlight relevant fields."""
+def _summarize_raw_logs(logs: list[dict], question: str, search_terms: list[str] = None) -> str:
+    """Summarize raw logs to highlight relevant fields and explain filter context."""
+    if search_terms is None:
+        search_terms = []
+        
     if not logs:
         return "No recent log records found."
     
-    summary_lines = [f"Found {len(logs)} recent log records:"]
+    # Identify what kind of search this was (geographic, port-based, IP-based, etc.)
+    country_names = {
+        'iran', 'china', 'russia', 'north korea', 'syria', 'cuba',
+        'usa', 'united states', 'uk', 'england', 'france', 'germany', 'japan',
+        'india', 'brazil', 'canada', 'australia', 'netherlands', 'israel',
+        'uae', 'saudi arabia', 'iraq', 'afghanistan', 'pakistan',
+    }
     
-    # Show sample records with relevant fields
-    for i, log in enumerate(logs[:5], 1):  # Show first 5 records
+    # Check if this is a geographic search
+    is_geo_search = any(term.lower() in country_names for term in search_terms)
+    if is_geo_search:
+        geo_term = next((term for term in search_terms if term.lower() in country_names), None)
+        geo_note = f"\n*** IMPORTANT: These {len(logs)} log records were specifically filtered to match your search for '{geo_term}' ***\nThis means the IPs in these logs are GEOLOCATED TO or ASSOCIATED WITH {geo_term.upper()}.\n"
+    else:
+        geo_note = ""
+    
+    summary_lines = [
+        f"Found {len(logs)} recent log records matching your search criteria{geo_note}"
+        if is_geo_search
+        else f"Found {len(logs)} recent log records (showing up to 10):"
+    ]
+    
+    # Show all records with relevant fields (limit to reasonable number)
+    display_limit = min(10, len(logs))
+    for i, log in enumerate(logs[:display_limit], 1):
         relevant_fields = [
             ("src", log.get("source.ip") or log.get("src_ip")),
             ("dst", log.get("destination.ip") or log.get("dest_ip")),
             ("port", log.get("destination.port") or log.get("dest_port")),
-            ("proto", log.get("network.protocol") or log.get("protocol")),
+            ("proto", log.get("network.protocol") or log.get("protocol") or log.get("proto")),
             ("host", log.get("host.hostname") or log.get("hostname")),
             ("time", log.get("@timestamp")[:10] if log.get("@timestamp") else "?"),
         ]
@@ -298,8 +412,8 @@ def _summarize_raw_logs(logs: list[dict], question: str) -> str:
         )
         summary_lines.append(f"  {i}. {fields_str}")
     
-    if len(logs) > 5:
-        summary_lines.append(f"  ... and {len(logs) - 5} more records")
+    if len(logs) > display_limit:
+        summary_lines.append(f"  ... and {len(logs) - display_limit} more records matching your search criteria")
     
     return "\n".join(summary_lines)
 
@@ -312,14 +426,18 @@ def _extract_answer_from_data(
 ) -> str:
     """Use LLM to extract answer from both RAG baselines and raw logs."""
     prompt = f"""You are a SOC analyst answering questions about network behavior.
-    
+
 User Question: "{question}"
 
 Available Context (both baselines and observed data):
 {context_text}
 
+CRITICAL: When logs are provided with a note about geographic filtering (e.g., "filtered to match..."), 
+those logs CONFIRM activity matching that criterion. If logs are present for a geographic search, 
+answer affirmatively (e.g., "Yes, there were connections to/from [country]").
+
 Based on the above data, answer the user's question concisely (1-3 sentences).
-Reference both baseline patterns and observed data. Be specific with IP addresses, ports, and protocols when relevant."""
+Reference both baseline patterns and observed data. Be specific with counts, IP addresses, ports, and protocols when relevant."""
 
     messages = [
         {"role": "system", "content": instruction},

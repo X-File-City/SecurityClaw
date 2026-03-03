@@ -24,19 +24,29 @@ The SOC agent has these security analysis skills:
 
 ## Routing Logic
 
+⚠️ **IMPORTANT RESTRICTION:**
+- `network_baseliner` is **explicit-only**: It will ONLY be invoked if the user:
+  1. Explicitly mentions the skill name ("use network_baseliner", "run the baseliner"), OR
+  2. Specifically asks to "create/generate/build a baseline"
+- **DO NOT** auto-route to network_baseliner for general analytics questions like "show me top IPs" or "what are common ports"
+- For those questions, use `rag_querier` instead to search existing baselines
+
 ### Single Skill Questions
 
 **Query Baselines** (rag_querier):
 ```
 Q: "Is there traffic to 8.8.8.8?"
 Q: "What protocols are normal?"
+Q: "Show me the top IPs"
 Q: "Show me the baseline for this sensor"
 → Use: rag_querier (searches stored baselines to answer)
 ```
 
-**Create Baselines** (network_baseliner):
+**Create Baselines** (network_baseliner) — EXPLICIT ONLY:
 ```
-Q: "Analyze this network and create a baseline"
+Q: "Run the network_baseliner"
+Q: "Create a baseline from these logs"
+Q: "Generate a new network baseline"
 → Use: network_baseliner (generates and stores new baselines)
 ```
 
