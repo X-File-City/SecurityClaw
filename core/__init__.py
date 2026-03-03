@@ -1,0 +1,3 @@
+"""
+SecurityClaw — Core package init.
+"""

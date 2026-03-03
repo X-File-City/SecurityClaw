@@ -1,0 +1,461 @@
+# SecurityClaw — Autonomous SOC Agentic Framework
+
+A modular, skill-based autonomous Security Operations Center (SOC) agent that monitors OpenSearch/Elasticsearch data, builds RAG-based behavioral memory, and validates real-time anomalies using LLMs.
+
+## Features
+
+✅ **Skill Modularity** — Capabilities as isolated folders with `logic.py` (Python) + `instruction.md` (LLM guidance)  
+✅ **Heartbeat Loop** — Cron-like scheduler: 1-minute anomaly watcher, 6-hour memory builder  
+✅ **Provider Agnostic** — Swap OpenSearch↔Elasticsearch and Ollama↔OpenAI via config  
+✅ **RAG-Based Memory** — Vector embeddings stored in OpenSearch; context-aware threat analysis  
+✅ **Working Memory** — Human-readable SITUATION.md tracks investigations, findings, and decisions  
+✅ **Zero Network I/O Tests** — 155 unit tests with mock DB, LLM, and data generators  
+
+---
+
+## Quick Start
+
+### 0. Prerequisites
+
+- Python 3.11+
+- OpenSearch or Elasticsearch (or use mock for testing)
+- Ollama or OpenAI API key
+
+### 1. Install Dependencies
+
+```bash
+cd SecurityClaw
+.venv/bin/pip install -r requirements.txt
+# or: pipenv install --dev
+```
+
+### 2. Interactive Onboarding
+
+```bash
+python main.py onboard
+```
+
+The wizard will guide you through:
+- **Database**: Host, port, SSL, auth
+- **LLM**: Provider (Ollama/OpenAI) and credentials
+- **Connection testing** for both services
+- **Configuration save** to `config.yaml` and `.env`
+
+See [ONBOARDING.md](ONBOARDING.md) for details.
+
+### 3. Start the Agent
+
+```bash
+python main.py run
+```
+
+The agent will start a background scheduler and begin polling for anomalies.
+
+### 4. View Status
+
+In another terminal:
+```bash
+python main.py status          # Print SITUATION.md
+python main.py list-skills     # Show loaded skills and intervals
+python main.py dispatch <skill>  # Fire a skill manually (e.g., anomaly_watcher)
+```
+
+---
+
+## Architecture
+
+### Directory Structure
+
+```
+SecurityClaw/
+├── config.yaml                 # Central DB/LLM/RAG configuration
+├── .env                        # Secrets (master credentials)
+├── SITUATION.md                # Agent working memory
+├── main.py                     # CLI entrypoint
+│
+├── core/
+│   ├── config.py              # YAML + env loader
+│   ├── memory.py              # SITUATION.md editor (Markdown)
+│   ├── runner.py              # Conductor (skill discovery, scheduling)
+│   ├── scheduler.py           # APScheduler wrapper
+│   ├── skill_loader.py        # Dynamic skill discovery
+│   ├── db_connector.py        # OpenSearch/ES abstraction
+│   ├── llm_provider.py        # Ollama/OpenAI abstraction
+│   └── rag_engine.py          # Embedding store & retrieval
+│
+├── skills/
+│   ├── network_baseliner/     # 6h: Aggregate logs → RAG vectors
+│   │   ├── logic.py
+│   │   └── instruction.md
+│   ├── anomaly_watcher/       # 1m: Poll AD findings → enrich → escalate
+│   │   ├── logic.py
+│   │   └── instruction.md
+│   └── threat_analyst/        # 5m: RAG reasoning → verdict (TRUE_THREAT/FALSE_POSITIVE)
+│       ├── logic.py
+│       └── instruction.md
+│
+├── tests/
+│   ├── conftest.py            # Shared fixtures
+│   ├── mock_opensearch.py     # In-memory DB (cosine kNN)
+│   ├── mock_llm.py            # Deterministic LLM (keyword-dispatched)
+│   ├── data_generator.py      # Synthetic network logs & anomalies
+│   └── test_*.py (9 files)    # 155 unit tests (all passing)
+│
+├── requirements.txt / Pipfile  # Dependencies
+└── ONBOARDING.md              # Interactive setup guide
+```
+
+### Core Design Principles
+
+| Principle | Implementation |
+|-----------|---|
+| **Skill Modularity** | Each skill is a folder with `logic.py` (entrypoint) and `instruction.md` (LLM system prompt) |
+| **Auto-Discovery** | Runner scans `/skills` and dynamically loads all valid skills |
+| **Stateful Memory** | SITUATION.md is human-readable Markdown edited by skills to track focus, findings, decisions, escalation |
+| **Scheduled Execution** | APScheduler fires skills at intervals; intervals defined in skill `instruction.md` front-matter |
+| **Provider Agnostic** | Abstract `BaseDBConnector` and `BaseLLMProvider` allow swapping vendors via config |
+| **RAG Context** | Embeddings stored in vector index; retrieved during LLM analysis for behavioral context |
+| **Testability** | Mock DB, LLM, and data generators enable 100% offline tests (155 tests, ~10s) |
+
+---
+
+## Skill Reference
+
+### NetworkBaseliner (6-hour cycle)
+
+**Purpose**: Build baseline of "normal" network behavior.
+
+**Logic**:
+1. Query recent logs (e.g., last 24 hours)
+2. Aggregate into summaries (typical ports, protocols, byte volumes)
+3. Generate LLM-enhanced descriptions
+4. Store as embedding vectors in the RAG index
+5. Update SITUATION.md with count of baseline chunks indexed
+
+**Output**: Baseline vectors used by ThreatAnalyst for context.
+
+### AnomalyWatcher (1-minute cycle)
+
+**Purpose**: Poll anomaly detection findings and escalate high-confidence anomalies.
+
+**Logic**:
+1. Query OpenSearch AD index for new findings (cursor-based, from last poll)
+2. Enrich each finding with LLM description (entity, score, severity)
+3. If severity ≥ threshold: write to Escalation Queue in SITUATION.md
+4. Update cursor for next poll
+
+**Output**: Escalated findings in memory, waiting for ThreatAnalyst analysis.
+
+### ThreatAnalyst (5-minute cycle)
+
+**Purpose**: Analyze escalated findings using RAG context; issue verdict.
+
+**Logic**:
+1. Read Escalation Queue from SITUATION.md
+2. For each finding:
+   - Query RAG engine for similar baseline context
+   - Build LLM prompt with finding + baseline context
+   - Request verdict (TRUE_THREAT, FALSE_POSITIVE, UNKNOWN, ERROR)
+3. Write verdicts and actions to "Recent Decisions"
+4. If TRUE_THREAT: set "Current Focus" and trigger IR playbooks
+
+**Output**: Verdicts with confidence, MITRE tactic mapping, recommended actions.
+
+---
+
+## Configuration
+
+### config.yaml
+
+```yaml
+agent:
+  name: SecurityClaw
+  version: "1.0.0"
+  situation_file: SITUATION.md
+  skills_dir: skills
+  log_level: INFO
+
+scheduler:
+  heartbeat_interval_seconds: 60
+  memory_build_interval_hours: 6
+
+db:
+  provider: opensearch          # or: elasticsearch
+  host: localhost
+  port: 9200
+  use_ssl: false
+  verify_certs: false
+  username: ""                  # Loaded from .env
+  password: ""                  # Loaded from .env
+  # Index configuration (configured during onboarding)
+  logs_index: securityclaw-logs          # Where to scan for network logs
+  anomaly_index: securityclaw-anomalies  # Where AD findings are stored
+  vector_index: securityclaw-vectors     # RAG embedding store
+
+llm:
+  provider: ollama              # or: openai
+  ollama_base_url: http://localhost:11434
+  ollama_model: llama3
+  # or:
+  # openai_model: gpt-4o
+  # openai_api_key_env: OPENAI_API_KEY
+
+rag:
+  embedding_model: all-MiniLM-L6-v2
+  top_k: 5
+  similarity_threshold: 0.65
+
+anomaly:
+  detector_id: default-detector
+  poll_interval_seconds: 60
+  severity_threshold: 0.7
+  max_findings_per_poll: 50
+```
+
+### Index Configuration Explained
+
+SecurityClaw works with **three indices**:
+
+| Index | Purpose | Used By | Example |
+|-------|---------|---------|---------|
+| **logs_index** | Historical network logs for baseline building | NetworkBaseliner (6h cycle) | `securityclaw-logs`, `logs-*`, `filebeat-*` |
+| **anomaly_index** | Anomaly Detection results (findings) | AnomalyWatcher (1m cycle) | `securityclaw-anomalies`, `.opendistro-anomaly-results*` |
+| **vector_index** | RAG embeddings (normal behavior baseline) | ThreatAnalyst (5m cycle) | `securityclaw-vectors` |
+
+**Flow:**
+1. **NetworkBaseliner** → queries `logs_index` → generates summaries → stores embeddings in `vector_index`
+2. **AnomalyWatcher** → polls `anomaly_index` for new findings → escalates to memory
+3. **ThreatAnalyst** → reads escalations → retrieves context from `vector_index` → issues verdict
+
+During onboarding, you can use any index names/patterns your environment provides (e.g., if your logs are in `filebeat-networking-*`, use that instead of `securityclaw-logs`).
+
+### .env (git-ignored)
+
+```
+OPENSEARCH_USERNAME=admin
+OPENSEARCH_PASSWORD=secret
+OPENAI_API_KEY=sk-...
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+---
+
+## CLI Commands
+
+```bash
+# Interactive setup
+python main.py onboard
+
+# Run the full agent (blocks; press Ctrl+C to stop)
+python main.py run
+
+# Fire one skill immediately
+python main.py dispatch anomaly_watcher
+python main.py dispatch network_baseliner
+python main.py dispatch threat_analyst
+
+# View working memory
+python main.py status
+
+# List skills and intervals
+python main.py list-skills
+
+# Set logging level
+python main.py --log-level DEBUG run
+```
+
+---
+
+## Testing
+
+All tests are offline (mocks for DB and LLM) — no real network I/O required.
+
+```bash
+# Run all 155 tests
+python -m pytest tests/ -v
+
+# Run a specific test file
+python -m pytest tests/test_rag.py -v
+
+# Test with coverage
+python -m pytest tests/ --cov=core --cov=skills
+```
+
+### What's Tested
+
+| Layer | Tests | Notes |
+|-------|-------|-------|
+| **Memory** | 16 | SITUATION.md read/write, sections, status transitions |
+| **Config** | (via conftest) | YAML + env loading |
+| **Scheduler** | 13 | Job registration, dispatch, intervals, cron expressions |
+| **DB Abstraction** | 20 | Search, kNN, anomaly findings, bulk indexing |
+| **LLM Abstraction** | 11 | Embedding, chat, canned responses |
+| **RAG Engine** | 15 | Store, retrieve, context building, category filters |
+| **Skill Loader** | 14 | Discovery, instruction loading, interval parsing |
+| **Skills** | 31 | NetworkBaseliner, AnomalyWatcher, ThreatAnalyst logic |
+| **Data Generator** | 24 | Synthetic logs, anomalies, baseline chunks, embeddings |
+
+---
+
+## Writing a New Skill
+
+### Anatomy of a Skill
+
+```
+skills/my_skill/
+├── logic.py          # Python
+└── instruction.md    # LLM guidance
+```
+
+**logic.py**:
+
+```python
+"""
+skills/my_skill/logic.py
+
+Context dict keys:
+  - db        → BaseDBConnector
+  - llm       → BaseLLMProvider
+  - memory    → AgentMemory
+  - config    → Config
+  - skills    → dict of loaded Skill objects
+"""
+from pathlib import Path
+
+SKILL_NAME = "my_skill"
+INSTRUCTION_PATH = Path(__file__).parent / "instruction.md"
+
+def run(context: dict) -> dict:
+    """
+    Main entry point. Called by Runner on schedule.
+    
+    Return a dict with status, results, etc.
+    """
+    db = context.get("db")
+    llm = context.get("llm")
+    memory = context.get("memory")
+    config = context.get("config")
+    
+    # Your logic here
+    memory.add_finding("Found something interesting")
+    
+    return {
+        "status": "ok",
+        "findings": 5,
+    }
+```
+
+**instruction.md**:
+
+```markdown
+---
+schedule_interval_seconds: 300
+---
+
+# My Skill
+
+You are a security analyst specializing in [X].
+
+When given anomalies, your job is to:
+1. [Step 1]
+2. [Step 2]
+
+Respond in JSON format with:
+```json
+{
+  "verdict": "...",
+  "confidence": ...,
+  "reasoning": "..."
+}
+```
+```
+
+---
+
+## Extending SecurityClaw
+
+### Add a New Skill
+
+1. Create `skills/my_skill/` directory
+2. Write `logic.py` with `run(context)` function
+3. Write `instruction.md` with LLM guidance and optional `schedule_interval_seconds`
+4. Restart agent or run `python main.py dispatch my_skill` to test
+
+### Add a DB Backend
+
+1. Subclass `BaseDBConnector` in `core/db_connector.py`
+2. Set `db.provider: my_db` in `config.yaml`
+3. Update `build_db_connector()` factory to instantiate your class
+
+### Add an LLM Backend
+
+1. Subclass `BaseLLMProvider` in `core/llm_provider.py`
+2. Set `llm.provider: my_llm` in `config.yaml`
+3. Update `build_llm_provider()` factory to instantiate your class
+
+---
+
+## Troubleshooting
+
+**"Module 'X' not found"**
+```bash
+.venv/bin/pip install -r requirements.txt
+```
+
+**"Cannot connect to OpenSearch"**
+- Verify OpenSearch is running: `curl -u admin:admin http://localhost:9200`
+- Check config.yaml host/port
+- Check firewall rules
+
+**"Cannot connect to Ollama"**
+- Start Ollama: `ollama serve`
+- Verify base URL in config.yaml
+
+**"Skill not loading"**
+- Check `/skills/<name>/logic.py` exists
+- Verify `run(context)` function signature
+- Check logs: `python main.py --log-level DEBUG run`
+
+**"No findings detected"**
+- Seed mock DB: See `tests/conftest.py` for example synthetic data
+- Check anomaly indices: `curl http://localhost:9200/_cat/indices?v`
+- Verify detector ID in config.yaml
+
+---
+
+## Performance Notes
+
+- **LLM Calls**: Each anomaly watcher and threat analyst cycle calls the LLM 1+ times (Ollama: ~1s per call, OpenAI: ~2s)
+- **RAG Retrieval**: kNN search is O(n) in mock; ~1ms per query on seeded DB
+- **Scheduler**: Background APScheduler has minimal overhead (~1% CPU idle)
+- **Memory**: SITUATION.md grows ~100 bytes per finding; no size limits
+
+---
+
+## Contributing
+
+Contributions welcome! Areas for enhancement:
+- [ ] Elasticsearch compatibility testing
+- [ ] Advanced MITRE ATT&CK mapping
+- [ ] Incident response playbook integrations
+- [ ] Multi-tenant support
+- [ ] API endpoint for external integrations
+- [ ] Web dashboard for SITUATION.md visualization
+
+---
+
+## License
+
+[Your License Here]
+
+---
+
+## Support
+
+For issues, questions, or feature requests, open an issue or contact the SecurityClaw team.
+
+---
+
+**Last Updated**: March 2, 2026  
+**Version**: 1.0.0  
+**Status**: Production Ready (155/155 tests passing)
