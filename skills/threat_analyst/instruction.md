@@ -1,5 +1,4 @@
 ---
-schedule_interval_seconds: 300
 skill: ThreatAnalyst
 description: >
   Retrieves pending HIGH/CRITICAL findings from agent memory, pulls

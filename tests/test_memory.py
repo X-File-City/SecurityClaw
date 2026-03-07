@@ -1,31 +1,13 @@
-"""
-tests/test_memory.py — Unit tests for AgentMemory.
-
-Tests the full lifecycle of SITUATION.md:
-  - Section reading/writing
-  - Status transitions
-  - Finding and decision append
-  - Escalation flow
-  - Snapshot
-  - File creation on first use
-"""
+"""tests/test_memory.py — Unit tests for the structured agent memory store."""
 from __future__ import annotations
-
-import pytest
-from pathlib import Path
 
 from core.memory import AgentMemory
 
 
-@pytest.fixture
-def tmp_memory(tmp_path) -> AgentMemory:
-    return AgentMemory(path=tmp_path / "SITUATION.md")
-
-
 class TestMemoryInitialization:
     def test_file_created_on_init(self, tmp_path):
-        mem = AgentMemory(path=tmp_path / "NEW.md")
-        assert (tmp_path / "NEW.md").exists()
+        mem = AgentMemory(path=tmp_path / "agent_memory.json")
+        assert (tmp_path / "agent_memory.json").exists()
 
     def test_initial_status_idle(self, tmp_memory):
         snap = tmp_memory.snapshot()
@@ -96,7 +78,7 @@ class TestStatusTransitions:
         tmp_memory.set_status("ACTIVE")
         content = tmp_memory.read()
         assert "**Last Updated:**" in content
-        assert "UTC" in content
+        assert "ACTIVE" in content
 
 
 class TestConvenienceMethods:
@@ -136,12 +118,37 @@ class TestSnapshot:
 
 
 class TestReadWrite:
-    def test_write_full_replaces_content(self, tmp_memory):
-        new_content = "# CLEAN SLATE\n\n## Current Focus\nNew focus\n"
+    def test_write_full_parses_markdown_into_structured_memory(self, tmp_memory):
+        new_content = (
+            "# CLEAN SLATE\n\n"
+            "**Agent Status:** ACTIVE\n\n"
+            "## Current Focus\nNew focus\n\n"
+            "## Recent Decisions\n- [2026-01-01 00:00:00 UTC] test decision\n"
+        )
         tmp_memory.write_full(new_content)
-        assert tmp_memory.read() == new_content
+        snapshot = tmp_memory.snapshot()
+        assert snapshot["status"] == "ACTIVE"
+        assert snapshot["focus"] == "New focus"
+        assert "test decision" in snapshot["decisions"]
 
     def test_read_returns_string(self, tmp_memory):
         content = tmp_memory.read()
         assert isinstance(content, str)
         assert len(content) > 0
+
+
+class TestMemoryBounds:
+    def test_findings_are_capped_to_limit(self, tmp_memory):
+        for i in range(60):
+            tmp_memory.add_finding(f"Finding #{i}")
+
+        body = tmp_memory.get_section("Open Findings")
+        assert "Finding #59" in body
+        assert "Finding #0" not in body
+
+    def test_compact_context_stays_small(self, tmp_memory):
+        for i in range(40):
+            tmp_memory.add_decision(f"Decision #{i} with extra context payload")
+
+        context = tmp_memory.compact_context(max_chars=1500)
+        assert len(context) <= 1500

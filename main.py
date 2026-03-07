@@ -4,9 +4,12 @@ main.py — SecurityClaw CLI entrypoint.
 Usage:
     python main.py onboard              # Interactive setup wizard
     python main.py run                  # Start full agent loop
+    python main.py service              # Start web service + API + scheduler
+    python main.py web-build            # Build the React frontend in /web
+    python main.py web-dev              # Start the frontend dev server
     python main.py dispatch <skill>     # Fire a skill once
     python main.py chat                 # Interactive chat with skill routing
-    python main.py status               # Print SITUATION.md
+    python main.py status               # Print the compact agent memory snapshot
     python main.py list-skills          # List discovered skills
 """
 from __future__ import annotations
@@ -14,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -21,7 +25,6 @@ from typing import Optional
 import click
 import yaml
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.prompt import Prompt, Confirm
 
 from core.config import Config
@@ -228,9 +231,6 @@ def onboard():
         llm_provider, llm_config, api_keys
     )
 
-    # Create SITUATION.md if it doesn't exist
-    _create_situation_file()
-
     # ──────────────────────────────────────────────────────────────────────────
     # Phase 5: Skill Variable Configuration (Optional)
     # ──────────────────────────────────────────────────────────────────────────
@@ -275,6 +275,46 @@ def run():
 
 
 @cli.command()
+@click.option("--host", default="0.0.0.0", show_default=True, help="Host interface for the web service")
+@click.option("--port", default=7799, show_default=True, type=int, help="Port for the web service")
+@click.option("--api-only", is_flag=True, help="Serve the API/UI without running scheduled skills")
+def service(host: str, port: int, api_only: bool):
+    """Start the web interface service (API + UI + optional scheduler)."""
+    from web.api.server import run_service
+
+    run_service(host=host, port=port, enable_scheduler=not api_only)
+
+
+@cli.command("web-build")
+def web_build():
+    """Install web dependencies and build the React frontend."""
+    web_dir = Path(__file__).parent / "web"
+    if not web_dir.exists():
+        console.print("[red]Error:[/] web/ directory not found.")
+        raise SystemExit(1)
+
+    console.print("[cyan]Installing web dependencies…[/]")
+    subprocess.run(["npm", "install"], cwd=web_dir, check=True)
+    console.print("[cyan]Building frontend…[/]")
+    subprocess.run(["npm", "run", "build"], cwd=web_dir, check=True)
+    console.print("[green]✓ Web frontend built successfully.[/]")
+
+
+@cli.command("web-dev")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=5173, show_default=True, type=int)
+def web_dev(host: str, port: int):
+    """Run the Vite development server for the web frontend."""
+    web_dir = Path(__file__).parent / "web"
+    if not web_dir.exists():
+        console.print("[red]Error:[/] web/ directory not found.")
+        raise SystemExit(1)
+
+    console.print("[cyan]Starting Vite dev server…[/]")
+    subprocess.run(["npm", "run", "dev", "--", "--host", host, "--port", str(port)], cwd=web_dir, check=True)
+
+
+@cli.command()
 @click.argument("skill_name")
 def dispatch(skill_name):
     """Fire a single skill immediately and print the result."""
@@ -290,9 +330,8 @@ def dispatch(skill_name):
 
 @cli.command()
 def status():
-    """Print the current SITUATION.md to terminal."""
-    memory = AgentMemory()
-    console.print(Markdown(memory.read()))
+    """Print the compact structured agent memory snapshot."""
+    console.print(AgentMemory().read())
 
 
 @cli.command("list-skills")
@@ -307,8 +346,10 @@ def list_skills():
     for name, skill in skills.items():
         if skill.schedule_cron_expr:
             schedule = f"cron: [magenta]{skill.schedule_cron_expr}[/]"
+        elif skill.schedule_interval_seconds is None:
+            schedule = "manual [magenta](on-demand)[/]"
         else:
-            interval = skill.schedule_interval_seconds or "?"
+            interval = skill.schedule_interval_seconds
             schedule = f"every [magenta]{interval}s[/]"
         console.print(f"  [cyan]{name}[/] — {schedule}")
 
@@ -336,8 +377,7 @@ def chat():
 
     cfg = Config()
     db = OpenSearchConnector()
-    llm = build_llm_provider(cfg)
-    memory = AgentMemory()
+    llm = build_llm_provider()
     from core.runner import Runner
     runner = Runner(db_connector=db, llm_provider=llm)
     runner.setup()
@@ -586,36 +626,6 @@ def _write_config(
 
     # Clear the Config singleton so it reloads on next use
     Config.reset()
-
-
-def _create_situation_file() -> None:
-    """Create SITUATION.md with initialization status if it doesn't exist."""
-    situation_path = Path(__file__).parent / "SITUATION.md"
-    
-    if situation_path.exists():
-        return  # Don't overwrite existing
-    
-    initial_situation = """# SecurityClaw Situation Report
-
-## Status
-Agent initialized and ready.
-
-## Current Focus
-- None (awaiting input)
-
-## Recent Findings
-- System online
-- RAG index ready
-- Baseline generation available
-
-## Notes
-- This file is automatically updated by the agent as it runs
-- Key findings and escalations tracked here
-- Regenerated on each major discovery or escalation
-"""
-    
-    situation_path.write_text(initial_situation, encoding="utf-8")
-    console.print(f"  [dim]Created {situation_path.name}[/]")
 
 
 if __name__ == "__main__":

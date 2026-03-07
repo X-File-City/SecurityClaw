@@ -11,7 +11,7 @@
 *.sln.docstates
 .env
 config.yaml
-SITUATION.md
+data/agent_memory.json
 .coverage
 htmlcov/
 

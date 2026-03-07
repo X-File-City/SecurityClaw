@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #050709;
+  color: #d6e7ef;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b1116;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #223443;
+  border-radius: 999px;
+}
+
+.panel {
+  @apply rounded-xl border border-border bg-panel shadow-[0_0_0_1px_rgba(0,255,153,0.02),0_16px_48px_rgba(0,0,0,0.35)];
+}
+
+.panel-2 {
+  @apply rounded-xl border border-border bg-panel2;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-panel2 px-4 py-2 font-mono text-xs font-medium tracking-[0.14em] text-text transition hover:border-cyan hover:text-cyan disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-primary {
+  @apply border-neon/50 bg-neon/10 text-neon hover:bg-neon/15;
+}
+
+.btn-danger {
+  @apply border-danger/40 bg-danger/10 text-danger hover:bg-danger/15;
+}
+
+.input, .textarea, .select {
+  @apply w-full rounded-lg border border-border bg-panel2 px-3 py-2 font-mono text-sm text-text outline-none transition placeholder:text-dim focus:border-cyan;
+}
+
+.textarea {
+  @apply min-h-40 resize-y;
+}
+
+.kv {
+  @apply flex items-center justify-between gap-4 border-b border-border/70 py-2 last:border-b-0;
+}
+
+.badge {
+  @apply inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[11px] uppercase tracking-[0.14em];
+}
+
+.badge-green { @apply border-neon/30 bg-neon/10 text-neon; }
+.badge-cyan { @apply border-cyan/30 bg-cyan/10 text-cyan; }
+.badge-amber { @apply border-amber/30 bg-amber/10 text-amber; }
+.badge-danger { @apply border-danger/30 bg-danger/10 text-danger; }
+.badge-dim { @apply border-border bg-panel2 text-dim; }
+
+.markdown {
+  color: #d6e7ef;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  color: #00d9ff;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown pre,
+.markdown table,
+.markdown blockquote {
+  margin: 0 0 0.9rem 0;
+}
+
+.markdown strong {
+  color: #00ff99;
+}
+
+.markdown code {
+  color: #00d9ff;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.25rem;
+}

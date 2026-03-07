@@ -1,7 +1,6 @@
 agent:
   name: SecurityClaw
   version: 1.0.0
-  situation_file: SITUATION.md
   skills_dir: skills
   log_level: INFO
 scheduler:

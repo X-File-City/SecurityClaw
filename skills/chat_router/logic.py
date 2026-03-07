@@ -1761,11 +1761,15 @@ def list_conversations() -> list[dict]:
                 history = json.load(f)
             
             if history:
+                first_user = next((entry for entry in history if entry.get("role") == "user"), {})
+                last_entry = history[-1] if history else {}
+                timestamp = last_entry.get("timestamp", "Unknown")
                 conversations.append({
                     "id": conv_file.stem,
                     "messages": len(history),
-                    "first_question": history[0].get("question", "Unknown"),
-                    "last_update": history[-1].get("timestamp", "Unknown"),
+                    "first_question": first_user.get("content", "Unknown"),
+                    "last_update": timestamp,
+                    "timestamp": timestamp,
                 })
         except Exception as e:
             logger.warning("Failed to read conversation file %s: %s", conv_file, e)
@@ -1795,6 +1799,7 @@ def add_to_history(conversation_id: str, question: str, answer: str,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "routing_skills": routing.get("skills", []),
         "routing_reasoning": routing.get("reasoning", ""),
+        "skill_results": skill_results,
     }
     history.append(assistant_entry)
     
@@ -1808,15 +1813,21 @@ def get_context_summary(conversation_id: str, last_n: int = 3) -> str:
     if not history:
         return ""
     
-    recent = history[-last_n:]
+    recent = history[-(last_n * 2):]
     summary_lines = []
-    
+
+    pending_question = ""
     for entry in recent:
-        summary_lines.append(f"Q: {entry.get('question', '')}")
-        answer = entry.get('answer', '')
-        # Truncate long answers
-        if len(answer) > 200:
-            answer = answer[:200] + "..."
-        summary_lines.append(f"A: {answer}")
+        role = entry.get("role", "")
+        content = entry.get("content", "")
+        if role == "user":
+            pending_question = content
+        elif role == "assistant":
+            summary_lines.append(f"Q: {pending_question}")
+            answer = content
+            if len(answer) > 200:
+                answer = answer[:200] + "..."
+            summary_lines.append(f"A: {answer}")
+            pending_question = ""
     
     return "\n".join(summary_lines)

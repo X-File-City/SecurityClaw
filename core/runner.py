@@ -45,10 +45,10 @@ class Runner:
         db_connector: Any = None,
         llm_provider: Any = None,
         skills_dir=None,
-        situation_path=None,
+        memory_path=None,
     ) -> None:
         self.cfg = Config()
-        self.memory = AgentMemory(path=situation_path)
+        self.memory = AgentMemory(path=memory_path)
         self.scheduler = AgentScheduler()
         self.loader = SkillLoader(skills_dir=skills_dir)
         self.db = db_connector
@@ -94,16 +94,13 @@ class Runner:
                         skill.schedule_cron_expr,
                     )
             else:
-                # Use interval-based scheduling
-                # Skill provides its own interval; if not, use configurable default
-                if skill.schedule_interval_seconds is not None:
-                    interval = skill.schedule_interval_seconds
-                else:
-                    interval = self.cfg.get(
-                        "scheduler",
-                        "heartbeat_interval_seconds",
-                        default=60
-                    )
+                # Use interval-based scheduling only when the skill declares one.
+                # Skills without interval/cron metadata are treated as manual.
+                if skill.schedule_interval_seconds is None:
+                    logger.info("Skill %s is manual (on-demand only).", name)
+                    continue
+
+                interval = skill.schedule_interval_seconds
                 self.scheduler.register(
                     name=name,
                     fn=skill.run,
@@ -113,21 +110,31 @@ class Runner:
 
         self._print_skill_table()
 
-    def run(self) -> None:
-        """Start the scheduler and block until signal received."""
+    def start(self, *, register_signals: bool = True) -> None:
+        """Start the scheduler without blocking the current thread."""
+        if self._running:
+            logger.info("Runner already active.")
+            return
+
         self._running = True
         self.scheduler.start()
         self.memory.set_status("ACTIVE")
+        self.memory.add_decision("Agent started.")
 
-        signal.signal(signal.SIGINT, self._handle_shutdown)
-        signal.signal(signal.SIGTERM, self._handle_shutdown)
+        if register_signals:
+            signal.signal(signal.SIGINT, self._handle_shutdown)
+            signal.signal(signal.SIGTERM, self._handle_shutdown)
+
+    def run(self) -> None:
+        """Start the scheduler and block until signal received."""
+        self.start(register_signals=True)
 
         console.print("[bold green]SecurityClaw is running.[/] Press Ctrl+C to stop.")
         try:
             while self._running:
                 time.sleep(1)
         finally:
-            self._shutdown()
+            self.stop()
 
     def dispatch(self, skill_name: str, context: Optional[dict] = None) -> Any:
         """Manually fire a skill for testing or CLI invocation."""
@@ -154,12 +161,21 @@ class Runner:
         logger.info("Signal %d received — shutting down.", signum)
         self._running = False
 
-    def _shutdown(self) -> None:
+    def stop(self) -> None:
+        """Stop the scheduler and update agent memory."""
+        if not self._running:
+            return
+
+        self._running = False
         console.print("[yellow]Shutting down SecurityClaw…[/]")
         self.scheduler.stop()
         self.memory.set_status("IDLE")
         self.memory.add_decision("Agent shut down cleanly.")
         console.print("[green]Done.[/]")
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
 
     def _print_skill_table(self) -> None:
         table = Table(title="Loaded Skills", show_lines=True)

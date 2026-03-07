@@ -62,7 +62,7 @@ def runner_context(seeded_db, mock_llm, tmp_path):
     from core.config import Config
     from core.memory import AgentMemory
 
-    memory = AgentMemory(path=tmp_path / "SITUATION.md")
+    memory = AgentMemory(path=tmp_path / "agent_memory.json")
     return {
         "db": seeded_db,
         "llm": mock_llm,
@@ -70,3 +70,10 @@ def runner_context(seeded_db, mock_llm, tmp_path):
         "config": Config(),
         "skills": {},
     }
+
+
+@pytest.fixture
+def tmp_memory(tmp_path):
+    from core.memory import AgentMemory
+
+    return AgentMemory(path=tmp_path / "agent_memory.json")

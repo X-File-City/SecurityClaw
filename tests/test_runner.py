@@ -46,7 +46,7 @@ class TestRunnerSetup:
             db_connector=MockDBConnector(),
             llm_provider=MockLLMProvider(),
             skills_dir=minimal_skills_dir,
-            situation_path=tmp_path / "SIT.md",
+            memory_path=tmp_path / "agent_memory.json",
         )
         runner.setup()
         assert "skill_alpha" in runner._skills
@@ -59,7 +59,7 @@ class TestRunnerSetup:
             db_connector=MockDBConnector(),
             llm_provider=MockLLMProvider(),
             skills_dir=empty_skills,
-            situation_path=tmp_path / "SIT.md",
+            memory_path=tmp_path / "agent_memory.json",
         )
         runner.setup()  # Should not raise
         assert runner._skills == {}
@@ -71,7 +71,7 @@ class TestRunnerDispatch:
             db_connector=MockDBConnector(),
             llm_provider=MockLLMProvider(),
             skills_dir=minimal_skills_dir,
-            situation_path=tmp_path / "SIT.md",
+            memory_path=tmp_path / "agent_memory.json",
         )
         runner.setup()
         result = runner.dispatch("skill_alpha")
@@ -85,7 +85,7 @@ class TestRunnerDispatch:
             db_connector=db,
             llm_provider=llm,
             skills_dir=minimal_skills_dir,
-            situation_path=tmp_path / "SIT.md",
+            memory_path=tmp_path / "agent_memory.json",
         )
         runner.setup()
         result = runner.dispatch("skill_alpha")
@@ -96,7 +96,7 @@ class TestRunnerDispatch:
             db_connector=MockDBConnector(),
             llm_provider=MockLLMProvider(),
             skills_dir=minimal_skills_dir,
-            situation_path=tmp_path / "SIT.md",
+            memory_path=tmp_path / "agent_memory.json",
         )
         runner.setup()
         result = runner.dispatch("skill_beta")
@@ -109,7 +109,7 @@ class TestRunnerDispatch:
             db_connector=MockDBConnector(),
             llm_provider=MockLLMProvider(),
             skills_dir=minimal_skills_dir,
-            situation_path=tmp_path / "SIT.md",
+            memory_path=tmp_path / "agent_memory.json",
         )
         runner.setup()
         with pytest.raises(KeyError):
@@ -127,7 +127,7 @@ class TestRunnerDispatch:
             db_connector=MockDBConnector(),
             llm_provider=MockLLMProvider(),
             skills_dir=skills,
-            situation_path=tmp_path / "SIT.md",
+            memory_path=tmp_path / "agent_memory.json",
         )
         runner.setup()
         ctx = runner._build_context()

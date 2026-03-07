@@ -8,7 +8,7 @@ A modular, skill-based autonomous Security Operations Center (SOC) agent that mo
 ✅ **Heartbeat Loop** — Cron-like scheduler: 1-minute anomaly watcher, 6-hour memory builder  
 ✅ **Provider Agnostic** — Swap OpenSearch↔Elasticsearch and Ollama↔OpenAI via config  
 ✅ **RAG-Based Memory** — Vector embeddings stored in OpenSearch; context-aware threat analysis  
-✅ **Working Memory** — Human-readable SITUATION.md tracks investigations, findings, and decisions  
+✅ **Working Memory** — Compact structured memory is stored locally in data/agent_memory.json with bounded sections for investigations, findings, and decisions  
 ✅ **Local GeoIP Lookup** — Optional MaxMind GeoLite2 city/state/country enrichment with weekly refresh  
 ✅ **Offline Test Suite** — ~300 collected tests with mocked DB/LLM and coverage reporting  
 
@@ -72,7 +72,7 @@ The agent will start a background scheduler and begin polling for anomalies.
 
 In another terminal:
 ```bash
-.venv/bin/python main.py status          # Print SITUATION.md
+.venv/bin/python main.py status          # Print the compact agent memory snapshot
 .venv/bin/python main.py list-skills     # Show loaded skills and intervals
 .venv/bin/python main.py dispatch <skill>  # Fire a skill manually (e.g., anomaly_triage)
 ```
@@ -87,12 +87,11 @@ In another terminal:
 SecurityClaw/
 ├── config.yaml                 # Central DB/LLM/RAG configuration
 ├── .env                        # Secrets (master credentials)
-├── SITUATION.md                # Agent working memory
 ├── main.py                     # CLI entrypoint
 │
 ├── core/
 │   ├── config.py              # YAML + env loader
-│   ├── memory.py              # SITUATION.md editor (Markdown)
+│   ├── memory.py              # Compact structured memory store
 │   ├── runner.py              # Conductor (skill discovery, scheduling)
 │   ├── scheduler.py           # APScheduler wrapper
 │   ├── skill_loader.py        # Dynamic skill discovery
@@ -128,7 +127,7 @@ SecurityClaw/
 |-----------|---|
 | **Skill Modularity** | Each skill is a folder with `logic.py` (entrypoint) and `instruction.md` (LLM system prompt) |
 | **Auto-Discovery** | Runner scans `/skills` and dynamically loads all valid skills |
-| **Stateful Memory** | SITUATION.md is human-readable Markdown edited by skills to track focus, findings, decisions, escalation |
+| **Stateful Memory** | A bounded JSON memory store in data/agent_memory.json tracks focus, findings, decisions, and escalation without uncontrolled growth |
 | **Scheduled Execution** | APScheduler fires skills at intervals; intervals defined in skill `instruction.md` front-matter |
 | **Provider Agnostic** | Abstract `BaseDBConnector` and `BaseLLMProvider` allow swapping vendors via config |
 | **RAG Context** | Embeddings stored in vector index; retrieved during LLM analysis for behavioral context |
@@ -147,7 +146,6 @@ SecurityClaw/
 2. Aggregate into summaries (typical ports, protocols, byte volumes)
 3. Generate LLM-enhanced descriptions
 4. Store as embedding vectors in the RAG index
-5. Update SITUATION.md with count of baseline chunks indexed
 
 **Output**: Baseline vectors used by ThreatAnalyst for context.
 
@@ -160,7 +158,7 @@ SecurityClaw/
 **Logic**:
 1. Query OpenSearch AD index for new findings (cursor-based, from last poll)
 2. Enrich each finding with LLM description (entity, score, severity)
-3. If severity ≥ threshold: write to Escalation Queue in SITUATION.md
+3. If severity ≥ threshold: write to the escalation queue in agent memory
 4. Update cursor for next poll
 
 **Output**: Escalated findings in memory, waiting for ThreatAnalyst analysis.
@@ -170,7 +168,7 @@ SecurityClaw/
 **Purpose**: Analyze escalated findings using RAG context; issue verdict.
 
 **Logic**:
-1. Read Escalation Queue from SITUATION.md
+1. Read the escalation queue from agent memory
 2. For each finding:
    - Query RAG engine for similar baseline context
    - Build LLM prompt with finding + baseline context
@@ -207,7 +205,6 @@ SecurityClaw/
 agent:
   name: SecurityClaw
   version: "1.0.0"
-  situation_file: SITUATION.md
   skills_dir: skills
   log_level: INFO
 
@@ -335,7 +332,6 @@ Current publication-prep baseline: the full suite is measured automatically, but
 
 | Layer | Tests | Notes |
 |-------|-------|-------|
-| **Memory** | 16 | SITUATION.md read/write, sections, status transitions |
 | **Config** | (via conftest) | YAML + env loading |
 | **Scheduler** | 13 | Job registration, dispatch, intervals, cron expressions |
 | **DB Abstraction** | 20 | Search, kNN, anomaly findings, bulk indexing |
@@ -481,7 +477,6 @@ Respond in JSON format with:
 - **LLM Calls**: Each anomaly watcher and threat analyst cycle calls the LLM 1+ times (Ollama: ~1s per call, OpenAI: ~2s)
 - **RAG Retrieval**: kNN search is O(n) in mock; ~1ms per query on seeded DB
 - **Scheduler**: Background APScheduler has minimal overhead (~1% CPU idle)
-- **Memory**: SITUATION.md grows ~100 bytes per finding; no size limits
 
 ---
 
@@ -493,7 +488,7 @@ Contributions welcome! Areas for enhancement:
 - [ ] Incident response playbook integrations
 - [ ] Multi-tenant support
 - [ ] API endpoint for external integrations
-- [ ] Web dashboard for SITUATION.md visualization
+- [ ] Expanded web dashboard for structured memory visualization
 
 ---
 
@@ -511,7 +506,7 @@ For issues, questions, or feature requests, open an issue or contact the Securit
 
 ## Security / Publication Checklist
 
-- `config.yaml`, `.env`, and `SITUATION.md` are intended to stay local and are git-ignored.
+- `config.yaml`, `.env`, and `data/agent_memory.json` are intended to stay local.
 - Use [config.yaml.example](config.yaml.example) as the public template.
 - Run a quick scan before publishing:
 

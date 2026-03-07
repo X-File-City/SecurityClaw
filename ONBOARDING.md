@@ -126,7 +126,6 @@ The agent will:
 - Poll OpenSearch for logs and anomaly findings
 - Build RAG context from normal behavior
 - Issue threat verdicts using the LLM
-- Update SITUATION.md with findings
 
 ### Feature Maturity Notes
 
@@ -178,7 +177,7 @@ OPENAI_API_KEY=<your-openai-api-key>
 | `.venv/bin/python main.py run` | Start the full agent (foreground) |
 | `.venv/bin/python main.py list-skills` | List discovered skills and intervals |
 | `.venv/bin/python main.py dispatch <skill>` | Fire a skill once (e.g., `anomaly_triage`) |
-| `.venv/bin/python main.py status` | Print current SITUATION.md |
+| `.venv/bin/python main.py status` | Print the compact agent memory snapshot |
 | `.venv/bin/python main.py --log-level DEBUG run` | Start with debug logging |
 
 ---
@@ -257,7 +256,6 @@ Simply repeat the wizard to update any settings (existing values are shown as de
 
 - **Modular Skills**: Each skill in `/skills/<name>/` has `logic.py` (Python) + `instruction.md` (LLM system prompt)
 - **Scheduler**: APScheduler fires skills on intervals (1-minute watcher, 6-hour baseliner)
-- **Memory**: SITUATION.md tracks active investigations, findings, decisions, and escalations
 - **RAG**: Embeddings stored in vector index; retrieved for contextual LLM analysis
 - **Provider Agnostic**: Swap DB backends and LLMs via config without code changes
 

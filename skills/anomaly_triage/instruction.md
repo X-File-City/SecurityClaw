@@ -1,8 +1,7 @@
 ---
-schedule_interval_seconds: 60
 skill: AnomalyTriage
 description: >
-  Polls the anomaly detection index every minute for new findings.
+  Polls the anomaly detection index for new findings.
   Enriches each finding with context metadata and hands off to
   ThreatAnalyst for verdict.
 ---
