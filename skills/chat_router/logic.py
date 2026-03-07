@@ -71,6 +71,10 @@ Available skills:
 ROUTING GUIDELINES:
 
 PRIMARY ROUTING RULES (Use These First):
+0. **DIRECT IP GEOLOCATION LOOKUP**: Questions asking where an IP is located, what country/city/state it belongs to,
+    or GeoIP enrichment for a specific IP → geoip_lookup.
+    Examples: "what country is 8.8.8.8 from?", "geolocate 1.1.1.1", "what city/state is this IP in?"
+
 1. **FIELD SCHEMA DISCOVERY FIRST**: Questions about "what fields exist", "which field holds X", 
    "what is the field name for Y" → fields_querier FIRST
    Examples: "what field holds country info?", "which field stores IP addresses?"
@@ -1107,6 +1111,10 @@ def format_response(
     if forensic_result and forensic_result.get("status") == "ok":
         return _format_forensic_response(user_question, forensic_result, skill_results.get("threat_analyst", {}))
 
+    geoip_result = skill_results.get("geoip_lookup", {})
+    if geoip_result and geoip_result.get("status") in {"ok", "not_found"}:
+        return _format_geoip_response(geoip_result)
+
     # ── PRIORITIZE OPENSEARCH/RAG BY DATA AVAILABILITY ──────────────────────
     # Check which has actual results (log records, not just findings)
     os_result = skill_results.get("opensearch_querier", {})
@@ -1541,6 +1549,54 @@ def _format_rag_response(user_question: str, rag_result: dict) -> str:
     if base_answer:
         return f"{base_answer}\n\n{details}"
     return details
+
+
+def _format_geoip_response(geoip_result: dict) -> str:
+    """Render direct GeoIP lookup or maintenance results without LLM synthesis."""
+    action = geoip_result.get("action", "ready")
+    db_path = geoip_result.get("db_path")
+    warning = geoip_result.get("warning")
+
+    if geoip_result.get("status") == "not_found":
+        response = f"No MaxMind geolocation record was found for IP {geoip_result.get('ip', 'unknown')}."
+        if db_path:
+            response += f" Database: {db_path}."
+        return response
+
+    ip = geoip_result.get("ip")
+    geo = geoip_result.get("geo") or {}
+    if not ip:
+        response = f"GeoIP database check complete. Status: {action}."
+        if db_path:
+            response += f" Database: {db_path}."
+        if warning:
+            response += f" Warning: {warning}."
+        return response
+
+    location_parts = []
+    for field in ("city", "subdivision", "country"):
+        value = geo.get(field)
+        if value and value not in location_parts:
+            location_parts.append(value)
+    location = ", ".join(location_parts) if location_parts else "an unknown location"
+
+    response = f"IP {ip} resolves to {location}."
+    extra = []
+    if geo.get("country_iso_code"):
+        extra.append(f"country code {geo['country_iso_code']}")
+    if geo.get("timezone"):
+        extra.append(f"timezone {geo['timezone']}")
+    if geo.get("postal_code"):
+        extra.append(f"postal code {geo['postal_code']}")
+    if geo.get("latitude") is not None and geo.get("longitude") is not None:
+        extra.append(f"coordinates {geo['latitude']}, {geo['longitude']}")
+    if extra:
+        response += " " + "; ".join(extra) + "."
+
+    response += f" GeoIP DB status: {action}."
+    if warning:
+        response += f" Warning: {warning}."
+    return response
 
 
 def _strip_json_like_content(text: str) -> str:

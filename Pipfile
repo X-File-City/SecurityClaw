@@ -12,6 +12,7 @@ pyyaml = ">=6.0.1"
 numpy = ">=1.26.0"
 sentence-transformers = ">=2.6.0"
 python-dotenv = ">=1.0.0"
+geoip2 = ">=4.8.0"
 rich = ">=13.7.0"
 click = ">=8.1.7"
 

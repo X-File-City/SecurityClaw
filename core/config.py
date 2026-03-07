@@ -79,6 +79,12 @@ class Config:
             env_overrides.setdefault("apis", {})["talos_client_id"] = os.getenv("TALOS_CLIENT_ID")
         if os.getenv("TALOS_CLIENT_SECRET"):
             env_overrides.setdefault("apis", {})["talos_client_secret"] = os.getenv("TALOS_CLIENT_SECRET")
+        if os.getenv("MAXMIND_LICENSE_KEY"):
+            env_overrides.setdefault("geoip", {})["license_key"] = os.getenv("MAXMIND_LICENSE_KEY")
+        if os.getenv("MAXMIND_EDITION_ID"):
+            env_overrides.setdefault("geoip", {})["edition_id"] = os.getenv("MAXMIND_EDITION_ID")
+        if os.getenv("MAXMIND_DB_PATH"):
+            env_overrides.setdefault("geoip", {})["db_path"] = os.getenv("MAXMIND_DB_PATH")
 
         self._data = _deep_merge(self._data, env_overrides)
 

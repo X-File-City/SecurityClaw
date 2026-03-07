@@ -9,6 +9,7 @@ A modular, skill-based autonomous Security Operations Center (SOC) agent that mo
 ✅ **Provider Agnostic** — Swap OpenSearch↔Elasticsearch and Ollama↔OpenAI via config  
 ✅ **RAG-Based Memory** — Vector embeddings stored in OpenSearch; context-aware threat analysis  
 ✅ **Working Memory** — Human-readable SITUATION.md tracks investigations, findings, and decisions  
+✅ **Local GeoIP Lookup** — Optional MaxMind GeoLite2 city/state/country enrichment with weekly refresh  
 ✅ **Offline Test Suite** — ~300 collected tests with mocked DB/LLM and coverage reporting  
 
 ---
@@ -179,6 +180,17 @@ SecurityClaw/
 
 **Output**: Verdicts with confidence, MITRE tactic mapping, recommended actions.
 
+### GeoIPLookup (weekly refresh + on-demand lookup)
+
+**Purpose**: Maintain a local MaxMind GeoLite2-City database and answer direct IP geolocation questions.
+
+**Logic**:
+1. On first use, download the MMDB if missing
+2. Once per week, refresh it if stale
+3. For a supplied IP, return local city / subdivision / country / timezone / coordinate data
+
+**Output**: Deterministic geolocation fields from the local MaxMind DB.
+
 ### Publication Status Notes
 
 - **AnomalyWatcher** — available, but still in-progress for broader real-world validation.
@@ -235,6 +247,15 @@ anomaly:
   poll_interval_seconds: 60
   severity_threshold: 0.7
   max_findings_per_poll: 50
+
+geoip:
+  enabled: true
+  db_path: data/geoip/GeoLite2-City.mmdb
+  edition_id: GeoLite2-City
+  update_interval_days: 7
+  download_url: https://download.maxmind.com/app/geoip_download
+  timeout_seconds: 60
+  license_key: ""               # Loaded from .env via MAXMIND_LICENSE_KEY
 ```
 
 ### Index Configuration Explained

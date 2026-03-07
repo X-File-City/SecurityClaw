@@ -37,3 +37,11 @@ anomaly:
   poll_interval_seconds: 60
   severity_threshold: 0.7
   max_findings_per_poll: 50
+geoip:
+  enabled: true
+  db_path: data/geoip/GeoLite2-City.mmdb
+  edition_id: GeoLite2-City
+  update_interval_days: 7
+  download_url: https://download.maxmind.com/app/geoip_download
+  timeout_seconds: 60
+  # License key loaded from .env: MAXMIND_LICENSE_KEY

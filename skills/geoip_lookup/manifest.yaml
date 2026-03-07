@@ -1,0 +1,42 @@
+name: geoip_lookup
+description: >
+  Downloads and maintains a local MaxMind GeoLite2-City MMDB file, then resolves
+  IP geolocation details such as city, subdivision/state, country, timezone, and coordinates.
+
+can_answer:
+  - "IP geolocation lookup"
+  - "what country/city/state an IP is from"
+  - "GeoIP enrichment"
+  - "location lookup for an IP address"
+  - "maintain local MaxMind GeoIP database"
+
+cannot_answer:
+  - "threat reputation"
+  - "log searching"
+  - "timeline reconstruction"
+  - "OpenSearch field discovery"
+  - "behavioral baseline analysis"
+
+priority_keywords:
+  - "geoip"
+  - "geolocate"
+  - "geolocation"
+  - "where is this ip"
+  - "what country"
+  - "what city"
+  - "state"
+  - "country"
+  - "city"
+  - "location"
+  - "maxmind"
+
+min_prior_context: 0
+
+returns:
+  - ip
+  - geo
+  - country
+  - subdivision
+  - city
+  - timezone
+  - db maintenance status
