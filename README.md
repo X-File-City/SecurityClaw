@@ -14,6 +14,12 @@ A modular, skill-based autonomous Security Operations Center (SOC) agent that mo
 
 ---
 
+## Web Interface
+
+<img src="img/web-screenshot.png" alt="SecurityClaw Web Interface" width="600" height="600">
+
+---
+
 ## Quick Start
 
 ### 0. Prerequisites

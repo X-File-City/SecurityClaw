@@ -1,5 +1,24 @@
 # SecurityClaw Onboarding Guide
 
+## Docker Quick Start
+
+If you have Ollama and OpenSearch running locally, use the Docker onboarding script:
+
+```bash
+./onboard-docker.sh
+```
+
+This script will:
+1. Check for an existing `config.yaml` (or offer to run the Python onboarding)
+2. Extract your Ollama settings from `config.yaml`
+3. Automatically convert `localhost` → `host.docker.internal` for Docker networking
+4. Test that Ollama is reachable
+5. Launch both the Python backend and Vite web frontend in Docker
+
+The web UI will be available at `http://localhost:5173` and the API at `http://localhost:7799`.
+
+## Classic Setup
+
 ## Quick Start
 
 The interactive configuration wizard guides you through setting up SecurityClaw in minutes.

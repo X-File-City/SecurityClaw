@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  service:
+    image: python:3.10
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "7799:7799"
+      - "5173:5173"
+    command: >
+      bash -c "
+        pip install -r requirements.txt &&
+        if [ -n '${OLLAMA_BASE_URL}' ]; then
+          sed -i 's|ollama_base_url:.*|ollama_base_url: ${OLLAMA_BASE_URL}|g' config.yaml;
+        fi &&
+        python main.py service --host 0.0.0.0 --port 7799
+      "
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-}
+
+  web:
+    image: node:20
+    working_dir: /app/web
+    volumes:
+      - .:/app
+    network_mode: service:service
+    command: >
+      bash -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - service
