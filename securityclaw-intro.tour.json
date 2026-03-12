@@ -181,7 +181,7 @@
     {
       "id": "threat-pipeline",
       "title": "Threat Detection Pipeline",
-      "description": "The security pipeline flows through three stages: (1) network_baseliner builds RAG embeddings of normal behavior every 6 hours, (2) anomaly_triage polls for anomaly detection findings every minute and enriches them with LLM analysis, (3) threat_analyst delivers a final verdict (TRUE_THREAT vs FALSE_POSITIVE) using RAG context and external intelligence from AbuseIPDB, AlienVault, VirusTotal, and Talos.",
+      "description": "The security pipeline flows through three stages. First, network_baseliner builds RAG embeddings of normal behavior every 6 hours. Next, anomaly_triage polls for findings every minute and enriches them with LLM analysis. Finally, threat_analyst delivers a verdict — TRUE_THREAT or FALSE_POSITIVE — using RAG context and external intelligence from AbuseIPDB, AlienVault, VirusTotal, and Talos.",
       "focusDirectory": "skills",
       "colorMode": "fileTypes",
       "highlightLayers": [
