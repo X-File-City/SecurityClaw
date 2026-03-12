@@ -1,0 +1,319 @@
+{
+  "id": "securityclaw-intro",
+  "title": "SecurityClaw: Autonomous SOC Agent",
+  "description": "A guided tour of SecurityClaw's architecture — an autonomous Security Operations Center agent that monitors OpenSearch data, builds RAG behavioral baselines, and uses local Ollama LLMs for threat analysis.",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "welcome-overview",
+      "title": "Welcome to SecurityClaw",
+      "description": "SecurityClaw is a modular SOC agent framework with real-time anomaly monitoring, LLM-powered threat analysis, and a skill-based plugin architecture. The codebase is organized into four main areas: the core framework, modular skills, a React web interface, and a comprehensive test suite.",
+      "focusDirectory": "",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "main-areas",
+          "name": "Key Areas",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "core", "type": "directory" },
+            { "path": "skills", "type": "directory" },
+            { "path": "web", "type": "directory" },
+            { "path": "tests", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "entry-points",
+          "name": "Entry Points",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "main.py", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ]
+    },
+    {
+      "id": "core-framework",
+      "title": "Core Framework",
+      "description": "The core/ directory is the engine room. The Runner orchestrates skill discovery and scheduling. Config loads YAML + env overrides. Memory provides bounded JSON working storage for findings, decisions, and escalations. The DB connector abstracts OpenSearch/Elasticsearch, and the LLM provider wraps Ollama for chat and embeddings.",
+      "focusDirectory": "core",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "orchestration",
+          "name": "Orchestration",
+          "color": "#ef4444",
+          "items": [
+            { "path": "core/runner.py", "type": "file" },
+            { "path": "core/scheduler.py", "type": "file" },
+            { "path": "core/config.py", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "intelligence",
+          "name": "AI & Data Layer",
+          "color": "#8b5cf6",
+          "items": [
+            { "path": "core/llm_provider.py", "type": "file" },
+            { "path": "core/rag_engine.py", "type": "file" },
+            { "path": "core/db_connector.py", "type": "file" },
+            { "path": "core/memory.py", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "query-system",
+          "name": "Query System",
+          "color": "#10b981",
+          "items": [
+            { "path": "core/query_builder.py", "type": "file" },
+            { "path": "core/query_repair.py", "type": "file" },
+            { "path": "core/query_repair_memory.py", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "See how skills are discovered and scheduled",
+          "target": "core/runner.py"
+        }
+      ]
+    },
+    {
+      "id": "skills-architecture",
+      "title": "Skills: Modular Security Capabilities",
+      "description": "Each skill lives in its own folder with a logic.py (run function), instruction.md (LLM guidance), and manifest.yaml (metadata). Skills receive shared context (DB, LLM, memory, config) via dependency injection. There are three types: scheduled skills that run on intervals, manual skills triggered on-demand, and the chat_router that orchestrates multi-turn conversations.",
+      "focusDirectory": "skills",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "scheduled-skills",
+          "name": "Scheduled (Automated)",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "skills/network_baseliner", "type": "directory" },
+            { "path": "skills/fields_baseliner", "type": "directory" },
+            { "path": "skills/geoip_lookup", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "manual-skills",
+          "name": "Manual (On-Demand)",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "skills/anomaly_triage", "type": "directory" },
+            { "path": "skills/threat_analyst", "type": "directory" },
+            { "path": "skills/forensic_examiner", "type": "directory" },
+            { "path": "skills/opensearch_querier", "type": "directory" },
+            { "path": "skills/baseline_querier", "type": "directory" },
+            { "path": "skills/fields_querier", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "router-skill",
+          "name": "Chat Router (Orchestrator)",
+          "color": "#ef4444",
+          "items": [
+            { "path": "skills/chat_router", "type": "directory" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ]
+    },
+    {
+      "id": "chat-router-deep-dive",
+      "title": "Chat Router: The Supervisor Brain",
+      "description": "The chat_router is the largest and most sophisticated skill. It acts as a conversational supervisor that routes user queries to the right skill, manages multi-turn reasoning with chain-of-thought prompts, and synthesizes results. Its prompt engineering is split across dedicated markdown files for routing, strategy, evaluation, and reflection.",
+      "focusDirectory": "skills/chat_router",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "router-logic",
+          "name": "Core Logic",
+          "color": "#ef4444",
+          "items": [
+            { "path": "skills/chat_router/logic.py", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "router-prompts",
+          "name": "Prompt Engineering",
+          "color": "#8b5cf6",
+          "items": [
+            { "path": "skills/chat_router/ROUTING_PROMPT.md", "type": "file" },
+            { "path": "skills/chat_router/SUPERVISOR_STRATEGY.md", "type": "file" },
+            { "path": "skills/chat_router/SUPERVISOR_EVALUATION_PROMPT.md", "type": "file" },
+            { "path": "skills/chat_router/SUPERVISOR_NEXT_ACTION_PROMPT.md", "type": "file" },
+            { "path": "skills/chat_router/RESPONSE_THINK_PROMPT.md", "type": "file" },
+            { "path": "skills/chat_router/RESPONSE_REFLECTION_PROMPT.md", "type": "file" },
+            { "path": "skills/chat_router/RESPONSE_VERIFICATION_PROMPT.md", "type": "file" },
+            { "path": "skills/chat_router/RESPONSE_FINAL_PROMPT.md", "type": "file" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "See how skills are selected for user queries",
+          "target": "skills/chat_router/ROUTING_PROMPT.md"
+        }
+      ]
+    },
+    {
+      "id": "threat-pipeline",
+      "title": "Threat Detection Pipeline",
+      "description": "The security pipeline flows through three stages: (1) network_baseliner builds RAG embeddings of normal behavior every 6 hours, (2) anomaly_triage polls for anomaly detection findings every minute and enriches them with LLM analysis, (3) threat_analyst delivers a final verdict (TRUE_THREAT vs FALSE_POSITIVE) using RAG context and external intelligence from AbuseIPDB, AlienVault, VirusTotal, and Talos.",
+      "focusDirectory": "skills",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "stage-1-baseline",
+          "name": "Stage 1: Baseline Building",
+          "color": "#10b981",
+          "items": [
+            { "path": "skills/network_baseliner", "type": "directory" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "stage-2-triage",
+          "name": "Stage 2: Anomaly Triage",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "skills/anomaly_triage", "type": "directory" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "stage-3-analysis",
+          "name": "Stage 3: Threat Verdict",
+          "color": "#ef4444",
+          "items": [
+            { "path": "skills/threat_analyst", "type": "directory" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "investigation",
+          "name": "Investigation Support",
+          "color": "#8b5cf6",
+          "items": [
+            { "path": "skills/forensic_examiner", "type": "directory" },
+            { "path": "skills/opensearch_querier", "type": "directory" }
+          ],
+          "opacity": 0.7,
+          "renderStrategy": "border"
+        }
+      ]
+    },
+    {
+      "id": "web-interface",
+      "title": "Web Interface",
+      "description": "The web/ directory provides a modern React + Tailwind frontend backed by a FastAPI server. The API layer handles chat streaming, skill dispatch, conversation history, and configuration. The React app delivers a real-time chat UI with memory visualization and skill control panels.",
+      "focusDirectory": "web",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "api-backend",
+          "name": "FastAPI Backend",
+          "color": "#10b981",
+          "items": [
+            { "path": "web/api", "type": "directory" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        },
+        {
+          "id": "react-frontend",
+          "name": "React Frontend",
+          "color": "#3b82f6",
+          "items": [
+            { "path": "web/src", "type": "directory" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "Explore the FastAPI server endpoints",
+          "target": "web/api/server.py"
+        }
+      ]
+    },
+    {
+      "id": "testing-infrastructure",
+      "title": "Testing Infrastructure",
+      "description": "The tests/ directory contains 40+ test files with mock OpenSearch (in-memory with cosine kNN), a deterministic mock LLM, and synthetic data generators for network logs and anomalies. Tests cover all core modules, skill integration, end-to-end scenarios like Iran traffic analysis, and supervisor skill selection.",
+      "focusDirectory": "tests",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "test-infra",
+          "name": "Test Infrastructure",
+          "color": "#f59e0b",
+          "items": [
+            { "path": "tests/conftest.py", "type": "file" },
+            { "path": "tests/mock_opensearch.py", "type": "file" },
+            { "path": "tests/mock_llm.py", "type": "file" },
+            { "path": "tests/data_generator.py", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ],
+      "interactiveActions": [
+        {
+          "type": "click-file",
+          "description": "See shared test fixtures and mocks",
+          "target": "tests/conftest.py"
+        }
+      ]
+    },
+    {
+      "id": "full-picture",
+      "title": "The Full Picture",
+      "description": "SecurityClaw brings together dynamic skill discovery, scheduled execution, RAG-powered context, and LLM reasoning into an autonomous SOC agent. Start with main.py to explore CLI commands, check ONBOARDING.md for setup, or dive into any skill folder to understand a specific capability. The architecture is designed for extension — add a new skill by creating a folder in skills/ with logic.py, instruction.md, and manifest.yaml.",
+      "focusDirectory": "",
+      "colorMode": "fileTypes",
+      "highlightLayers": [
+        {
+          "id": "start-here",
+          "name": "Start Here",
+          "color": "#10b981",
+          "items": [
+            { "path": "main.py", "type": "file" },
+            { "path": "ONBOARDING.md", "type": "file" },
+            { "path": "README.md", "type": "file" },
+            { "path": "config.yaml.example", "type": "file" }
+          ],
+          "opacity": 0.8,
+          "renderStrategy": "border"
+        }
+      ]
+    }
+  ]
+}
